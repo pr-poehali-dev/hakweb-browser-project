@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 
 type Tab = "home" | "extensions" | "history" | "security" | "settings" | "profile";
@@ -53,10 +53,61 @@ const MOCK_HISTORY: HistoryItem[] = [
   { id: "6", url: "https://stackoverflow.com/questions/123", title: "Stack Overflow — VLESS proxy", time: "вчера", favicon: "Code" },
 ];
 
+const ONBOARDING_STEPS = [
+  {
+    icon: "Home",
+    color: "var(--neon-cyan)",
+    title: "Главная страница",
+    desc: "Здесь ты найдёшь быстрые ссылки, поиск и статистику блокировок. Введи запрос или URL и нажми Enter — откроется в новой вкладке.",
+  },
+  {
+    icon: "Puzzle",
+    color: "var(--neon-green)",
+    title: "Расширения: VLESS и Прокси",
+    desc: "Перейди в «Расширения» → «VLESS Ключи». Нажми «Добавить», вставь свой vless:// ключ и нажми ВКЛ. Аналогично для прокси — указываешь хост, порт и тип.",
+  },
+  {
+    icon: "Shield",
+    color: "var(--neon-purple)",
+    title: "Безопасность",
+    desc: "В разделе «Безопасность» включай AdBlock, защиту от слежки и принудительный HTTPS. Индекс защиты покажет уровень приватности.",
+  },
+  {
+    icon: "Settings",
+    color: "var(--neon-yellow)",
+    title: "Настройки и темы",
+    desc: "Переключай тёмную и светлую тему в «Настройках» или кнопкой ☀/☾ в шапке. Также можно выбрать цвет неонового акцента.",
+  },
+  {
+    icon: "User",
+    color: "var(--neon-pink)",
+    title: "Профиль и синхронизация",
+    desc: "В «Профиле» редактируй имя и email. Синхронизация сохраняет закладки, историю и расширения между устройствами.",
+  },
+];
+
+function normalizeUrl(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return "https://www.google.com";
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  if (trimmed.includes(".") && !trimmed.includes(" ")) return `https://${trimmed}`;
+  return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
+}
+
 export default function Index() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [urlValue, setUrlValue] = useState("hakweb://newtab");
+  const [searchInput, setSearchInput] = useState("");
+  const [animKey, setAnimKey] = useState(0);
+
+  // Onboarding
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return !localStorage.getItem("hakweb_onboarded");
+  });
+  const [onboardStep, setOnboardStep] = useState(0);
+
+  // VLESS / Proxy state
   const [vlessKeys, setVlessKeys] = useState<VlessKey[]>([
     { id: "1", name: "Server RU-01", key: "vless://uuid@host:443?encryption=none&security=tls&type=ws#RU-01", active: true, ping: 42 },
     { id: "2", name: "Server DE-02", key: "vless://uuid@host2:443?encryption=none&security=reality&type=tcp#DE-02", active: false, ping: 88 },
@@ -69,16 +120,23 @@ export default function Index() {
   const [newProxy, setNewProxy] = useState({ name: "", host: "", port: "", type: "SOCKS5" as ProxyEntry["type"] });
   const [addingVless, setAddingVless] = useState(false);
   const [addingProxy, setAddingProxy] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+
+  // Security
   const [adBlock, setAdBlock] = useState(true);
   const [tracking, setTracking] = useState(true);
   const [httpsForce, setHttpsForce] = useState(true);
+  const [dns, setDns] = useState("1.1.1.1");
+
+  // Settings
   const [optimization, setOptimization] = useState(true);
   const [acceleration, setAcceleration] = useState(false);
-  const [dns, setDns] = useState("1.1.1.1");
+
+  // Profile
   const [profileName, setProfileName] = useState("Hacker_0x1");
   const [profileEmail, setProfileEmail] = useState("hacker@hakweb.io");
-  const [animKey, setAnimKey] = useState(0);
+
+  // History search
+  const [historySearch, setHistorySearch] = useState("");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -89,21 +147,44 @@ export default function Index() {
     setAnimKey(k => k + 1);
   };
 
-  const toggleVless = (id: string) => {
+  // Search / navigate
+  const doSearch = useCallback(() => {
+    const query = searchInput.trim();
+    if (!query) return;
+    const url = normalizeUrl(query);
+    window.open(url, "_blank", "noopener,noreferrer");
+    setSearchInput("");
+  }, [searchInput]);
+
+  const handleSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") doSearch();
+  };
+
+  // URL bar navigate
+  const handleUrlKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      const url = normalizeUrl(urlValue);
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const finishOnboarding = () => {
+    localStorage.setItem("hakweb_onboarded", "1");
+    setShowOnboarding(false);
+  };
+
+  const toggleVless = (id: string) =>
     setVlessKeys(prev => prev.map(v => ({ ...v, active: v.id === id ? !v.active : false })));
-  };
-
   const deleteVless = (id: string) => setVlessKeys(prev => prev.filter(v => v.id !== id));
-  const deleteProxy = (id: string) => setProxies(prev => prev.filter(p => p.id !== id));
-
-  const toggleProxy = (id: string) => {
+  const toggleProxy = (id: string) =>
     setProxies(prev => prev.map(p => ({ ...p, active: p.id === id ? !p.active : false })));
-  };
+  const deleteProxy = (id: string) => setProxies(prev => prev.filter(p => p.id !== id));
 
   const addVless = () => {
     if (!newVless.key.trim()) return;
     setVlessKeys(prev => [...prev, {
-      id: Date.now().toString(), name: newVless.name || "Новый сервер", key: newVless.key, active: false, ping: Math.floor(Math.random() * 100 + 20)
+      id: Date.now().toString(), name: newVless.name || "Новый сервер",
+      key: newVless.key, active: false, ping: Math.floor(Math.random() * 100 + 20),
     }]);
     setNewVless({ name: "", key: "" });
     setAddingVless(false);
@@ -113,15 +194,15 @@ export default function Index() {
     if (!newProxy.host.trim()) return;
     setProxies(prev => [...prev, {
       id: Date.now().toString(), name: newProxy.name || "Новый прокси",
-      host: newProxy.host, port: newProxy.port, type: newProxy.type, active: false
+      host: newProxy.host, port: newProxy.port, type: newProxy.type, active: false,
     }]);
     setNewProxy({ name: "", host: "", port: "", type: "SOCKS5" });
     setAddingProxy(false);
   };
 
   const filteredHistory = MOCK_HISTORY.filter(h =>
-    h.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    h.url.toLowerCase().includes(searchQuery.toLowerCase())
+    h.title.toLowerCase().includes(historySearch.toLowerCase()) ||
+    h.url.toLowerCase().includes(historySearch.toLowerCase())
   );
 
   const activeVless = vlessKeys.find(v => v.active);
@@ -140,11 +221,88 @@ export default function Index() {
     <div className={`min-h-screen flex flex-col cyber-grid ${theme === "dark" ? "dark" : ""}`}
       style={{ background: theme === "dark" ? "hsl(230,25%,5%)" : "hsl(220,20%,96%)" }}>
 
-      {/* Scan line effect */}
-      <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
+      {/* Scan line */}
+      <div className="pointer-events-none fixed inset-0 z-[60] overflow-hidden">
         <div className="absolute left-0 right-0 h-px animate-scanline opacity-20"
           style={{ background: "linear-gradient(90deg, transparent, var(--neon-cyan), transparent)" }} />
       </div>
+
+      {/* ========== ONBOARDING MODAL ========== */}
+      {showOnboarding && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }}>
+          <div className="glass-card w-full max-w-md p-6 animate-scale-in"
+            style={{ border: "1px solid var(--neon-cyan)", boxShadow: "0 0 40px rgba(0,212,255,0.2)" }}>
+
+            {/* Header */}
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full flex items-center justify-center"
+                  style={{ background: "rgba(0,212,255,0.15)", border: "1px solid var(--neon-cyan)" }}>
+                  <Icon name="BookOpen" size={14} style={{ color: "var(--neon-cyan)" }} />
+                </div>
+                <span className="font-orbitron text-sm font-bold tracking-widest" style={{ color: "var(--neon-cyan)" }}>
+                  ОБУЧЕНИЕ
+                </span>
+              </div>
+              <span className="font-mono text-xs text-muted-foreground">
+                {onboardStep + 1} / {ONBOARDING_STEPS.length}
+              </span>
+            </div>
+
+            {/* Step indicator */}
+            <div className="flex gap-1.5 mb-5">
+              {ONBOARDING_STEPS.map((_, i) => (
+                <div key={i} className="h-1 flex-1 rounded-full transition-all duration-300"
+                  style={{ background: i <= onboardStep ? "var(--neon-cyan)" : "rgba(100,120,140,0.3)", boxShadow: i === onboardStep ? "0 0 8px var(--neon-cyan)" : "none" }} />
+              ))}
+            </div>
+
+            {/* Step content */}
+            <div className="animate-fade-in" key={onboardStep}>
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
+                style={{ background: `${ONBOARDING_STEPS[onboardStep].color}14`, border: `1px solid ${ONBOARDING_STEPS[onboardStep].color}50` }}>
+                <Icon name={ONBOARDING_STEPS[onboardStep].icon} size={26} style={{ color: ONBOARDING_STEPS[onboardStep].color }} />
+              </div>
+              <h3 className="font-orbitron font-bold text-lg mb-2" style={{ color: ONBOARDING_STEPS[onboardStep].color }}>
+                {ONBOARDING_STEPS[onboardStep].title}
+              </h3>
+              <p className="font-rajdhani text-base leading-relaxed text-muted-foreground">
+                {ONBOARDING_STEPS[onboardStep].desc}
+              </p>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex gap-3 mt-6">
+              {onboardStep > 0 && (
+                <button onClick={() => setOnboardStep(s => s - 1)}
+                  className="flex-1 py-2.5 rounded-lg font-orbitron text-xs tracking-wider transition-all"
+                  style={{ border: "1px solid var(--glass-border)", color: "hsl(var(--muted-foreground))", background: "var(--glass-bg)" }}>
+                  НАЗАД
+                </button>
+              )}
+              {onboardStep < ONBOARDING_STEPS.length - 1 ? (
+                <button onClick={() => setOnboardStep(s => s + 1)}
+                  className="flex-1 py-2.5 rounded-lg font-orbitron text-xs tracking-wider transition-all"
+                  style={{ background: "var(--neon-cyan)", color: "#000", boxShadow: "0 0 15px rgba(0,212,255,0.4)" }}>
+                  ДАЛЕЕ
+                </button>
+              ) : (
+                <button onClick={finishOnboarding}
+                  className="flex-1 py-2.5 rounded-lg font-orbitron text-xs tracking-wider transition-all"
+                  style={{ background: "var(--neon-green)", color: "#000", boxShadow: "0 0 15px rgba(0,255,136,0.4)" }}>
+                  НАЧАТЬ РАБОТУ
+                </button>
+              )}
+            </div>
+
+            <button onClick={finishOnboarding}
+              className="w-full mt-3 font-mono text-xs text-center text-muted-foreground hover:text-foreground transition-colors">
+              пропустить обучение
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ===== TOP BAR ===== */}
       <header className="glass sticky top-0 z-40 px-4 py-2 flex items-center gap-3"
@@ -166,7 +324,7 @@ export default function Index() {
           </span>
         </div>
 
-        {/* Nav arrows */}
+        {/* Nav buttons */}
         <div className="flex items-center gap-1.5 shrink-0">
           {["ChevronLeft", "ChevronRight", "RotateCcw"].map((ic, i) => (
             <button key={i} className="w-7 h-7 rounded-md flex items-center justify-center transition-all hover:scale-110"
@@ -180,21 +338,35 @@ export default function Index() {
         <div className="flex-1 relative">
           <Icon name="Lock" size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
-            className="url-bar w-full pl-8 pr-3 py-1.5 rounded-lg text-sm"
+            className="url-bar w-full pl-8 pr-24 py-1.5 rounded-lg text-sm"
             value={urlValue}
             onChange={e => setUrlValue(e.target.value)}
+            onKeyDown={handleUrlKey}
+            placeholder="Введите URL или запрос..."
           />
-          {(activeVless || activeProxy) && (
-            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-              {activeVless && (
-                <span className="cyber-badge text-black" style={{ background: "var(--neon-green)" }}>VPN</span>
-              )}
-              {activeProxy && (
-                <span className="cyber-badge text-white" style={{ background: "var(--neon-purple)" }}>PROXY</span>
-              )}
-            </div>
-          )}
+          <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            {activeVless && (
+              <span className="cyber-badge text-black" style={{ background: "var(--neon-green)" }}>VPN</span>
+            )}
+            {activeProxy && (
+              <span className="cyber-badge text-white" style={{ background: "var(--neon-purple)" }}>PROXY</span>
+            )}
+            <button
+              onClick={() => { const url = normalizeUrl(urlValue); window.open(url, "_blank", "noopener,noreferrer"); }}
+              className="w-6 h-6 rounded flex items-center justify-center transition-all hover:scale-110"
+              style={{ background: "var(--neon-cyan)", color: "#000" }}>
+              <Icon name="ArrowRight" size={11} />
+            </button>
+          </div>
         </div>
+
+        {/* Help button */}
+        <button onClick={() => { setShowOnboarding(true); setOnboardStep(0); }}
+          className="w-8 h-8 rounded-lg flex items-center justify-center transition-all hover:scale-110 shrink-0"
+          style={{ border: "1px solid var(--glass-border)", background: "var(--glass-bg)" }}
+          title="Обучение">
+          <Icon name="HelpCircle" size={14} className="text-muted-foreground" />
+        </button>
 
         {/* Theme toggle */}
         <button onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}
@@ -209,7 +381,7 @@ export default function Index() {
       <div className="flex flex-1 min-h-0">
 
         {/* Sidebar */}
-        <aside className="w-14 lg:w-52 flex flex-col py-4 gap-1 px-2 shrink-0 sticky top-14 h-[calc(100vh-56px)]"
+        <aside className="w-14 lg:w-52 flex flex-col py-4 gap-1 px-2 shrink-0 sticky top-14 h-[calc(100vh-56px)] overflow-y-auto"
           style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--glass-border)" }}>
           {NAV_ITEMS.map(item => (
             <button key={item.id} onClick={() => switchTab(item.id)}
@@ -251,7 +423,7 @@ export default function Index() {
             {/* ========== HOME ========== */}
             {activeTab === "home" && (
               <div className="space-y-6">
-                <div className="text-center py-8 space-y-2">
+                <div className="text-center py-6 space-y-2">
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full mb-3 font-mono text-xs"
                     style={{ border: "1px solid var(--glass-border)", background: "var(--glass-bg)", color: "var(--neon-cyan)" }}>
                     <div className="w-1.5 h-1.5 rounded-full animate-pulse-neon" style={{ background: "var(--neon-green)" }} />
@@ -269,10 +441,19 @@ export default function Index() {
                 {/* Search */}
                 <div className="relative max-w-xl mx-auto">
                   <Icon name="Search" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input placeholder="Поиск или введите URL..."
-                    className="cyber-input pl-10 py-3 text-base rounded-xl" />
-                  <kbd className="absolute right-4 top-1/2 -translate-y-1/2 font-mono text-xs px-1.5 py-0.5 rounded"
-                    style={{ border: "1px solid var(--glass-border)", background: "var(--glass-bg)", color: "var(--neon-cyan)" }}>↵</kbd>
+                  <input
+                    placeholder="Поиск или введите URL... (Enter для открытия)"
+                    className="cyber-input pl-10 pr-28 py-3 text-base rounded-xl"
+                    value={searchInput}
+                    onChange={e => setSearchInput(e.target.value)}
+                    onKeyDown={handleSearchKey}
+                  />
+                  <button
+                    onClick={doSearch}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-lg font-orbitron text-xs font-bold transition-all hover:scale-105"
+                    style={{ background: "var(--neon-cyan)", color: "#000", boxShadow: "0 0 12px rgba(0,212,255,0.4)" }}>
+                    НАЙТИ
+                  </button>
                 </div>
 
                 {/* Quick links */}
@@ -283,7 +464,9 @@ export default function Index() {
                   </h2>
                   <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
                     {QUICK_LINKS.map((link, i) => (
-                      <button key={link.id} className="glass-card p-3 flex flex-col items-center gap-2 group"
+                      <button key={link.id}
+                        onClick={() => window.open(link.url, "_blank", "noopener,noreferrer")}
+                        className="glass-card p-3 flex flex-col items-center gap-2 group"
                         style={{ animationDelay: `${i * 0.05}s` }}>
                         <div className="w-9 h-9 rounded-lg flex items-center justify-center transition-all group-hover:scale-110"
                           style={{ background: "rgba(0,212,255,0.08)", border: "1px solid var(--glass-border)" }}>
@@ -300,22 +483,22 @@ export default function Index() {
                 {/* Stats */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
-                    { label: "Заблокировано реклам", value: "1,247", icon: "ShieldOff", color: "var(--neon-green)" },
-                    { label: "Скорость загрузки", value: "2.1x", icon: "Zap", color: "var(--neon-yellow)" },
-                    { label: "Сэкономлено трафика", value: "34%", icon: "TrendingDown", color: "var(--neon-cyan)" },
-                    { label: "Активных расш.", value: activeVless ? "VPN ВКЛ" : "—", icon: "Puzzle", color: "var(--neon-purple)" },
+                    { label: "Заблокировано", value: "1 247", icon: "ShieldOff", color: "var(--neon-green)" },
+                    { label: "Скорость", value: "2.1x", icon: "Zap", color: "var(--neon-yellow)" },
+                    { label: "Трафик сохранён", value: "34%", icon: "TrendingDown", color: "var(--neon-cyan)" },
+                    { label: "VPN статус", value: activeVless ? "ВКЛ" : "ВЫКЛ", icon: "Wifi", color: activeVless ? "var(--neon-green)" : "var(--neon-purple)" },
                   ].map((stat, i) => (
                     <div key={i} className="glass-card p-4 space-y-2">
                       <div className="flex items-center gap-2">
-                        <Icon name={stat.icon} size={14} style={{ color: stat.color }} />
+                        <Icon name={stat.icon} size={13} style={{ color: stat.color }} />
                         <span className="font-mono text-xs text-muted-foreground truncate">{stat.label}</span>
                       </div>
-                      <p className="font-orbitron font-bold text-lg" style={{ color: stat.color }}>{stat.value}</p>
+                      <p className="font-orbitron font-bold text-xl" style={{ color: stat.color }}>{stat.value}</p>
                     </div>
                   ))}
                 </div>
 
-                {/* Recent */}
+                {/* Recent history */}
                 <div>
                   <h2 className="font-orbitron text-xs tracking-widest text-muted-foreground mb-3 flex items-center gap-2">
                     <Icon name="Clock" size={12} style={{ color: "var(--neon-purple)" }} />
@@ -323,7 +506,9 @@ export default function Index() {
                   </h2>
                   <div className="space-y-1.5">
                     {MOCK_HISTORY.slice(0, 4).map((item, i) => (
-                      <div key={item.id} className="glass-card px-4 py-2.5 flex items-center gap-3 animate-fade-in"
+                      <button key={item.id}
+                        onClick={() => window.open(item.url, "_blank", "noopener,noreferrer")}
+                        className="glass-card px-4 py-2.5 flex items-center gap-3 w-full text-left animate-fade-in"
                         style={{ animationDelay: `${i * 0.06}s` }}>
                         <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
                           style={{ background: "rgba(0,212,255,0.06)", border: "1px solid var(--glass-border)" }}>
@@ -334,7 +519,7 @@ export default function Index() {
                           <p className="font-mono text-xs text-muted-foreground truncate">{item.url}</p>
                         </div>
                         <span className="font-mono text-xs text-muted-foreground shrink-0">{item.time}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -390,7 +575,7 @@ export default function Index() {
                             <Icon name="Wifi" size={15} style={{ color: vless.active ? "var(--neon-green)" : "var(--neon-cyan)" }} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
                               <span className="font-rajdhani font-bold text-sm">{vless.name}</span>
                               {vless.active && <span className="cyber-badge text-black" style={{ background: "var(--neon-green)" }}>АКТИВЕН</span>}
                               {vless.ping && (
@@ -399,14 +584,15 @@ export default function Index() {
                                 </span>
                               )}
                             </div>
-                            <p className="font-mono text-xs text-muted-foreground truncate">{vless.key.slice(0, 60)}...</p>
+                            <p className="font-mono text-xs text-muted-foreground truncate">{vless.key.slice(0, 55)}...</p>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            <button onClick={() => toggleVless(vless.id)} className={`btn-neon text-xs py-1 px-2.5 rounded ${vless.active ? "btn-neon-purple" : ""}`}>
+                            <button onClick={() => toggleVless(vless.id)}
+                              className={`btn-neon text-xs py-1 px-2.5 rounded ${vless.active ? "btn-neon-purple" : ""}`}>
                               <span>{vless.active ? "ОТКЛ" : "ВКЛ"}</span>
                             </button>
                             <button onClick={() => deleteVless(vless.id)}
-                              className="w-7 h-7 rounded-md flex items-center justify-center"
+                              className="w-7 h-7 rounded-md flex items-center justify-center hover:opacity-70 transition-opacity"
                               style={{ border: "1px solid var(--glass-border)", color: "hsl(var(--muted-foreground))" }}>
                               <Icon name="Trash2" size={12} />
                             </button>
@@ -449,7 +635,8 @@ export default function Index() {
                       </div>
                       <select value={newProxy.type}
                         onChange={e => setNewProxy(p => ({ ...p, type: e.target.value as ProxyEntry["type"] }))}
-                        className="cyber-input">
+                        className="cyber-input"
+                        style={{ background: "var(--glass-bg)", color: "hsl(var(--foreground))" }}>
                         <option value="SOCKS5">SOCKS5</option>
                         <option value="SOCKS4">SOCKS4</option>
                         <option value="HTTP">HTTP</option>
@@ -468,19 +655,19 @@ export default function Index() {
                             <Icon name="Server" size={15} style={{ color: "var(--neon-purple)" }} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5">
+                            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                               <span className="font-rajdhani font-bold text-sm">{proxy.name}</span>
                               <span className="cyber-badge" style={{ background: "rgba(168,85,247,0.15)", color: "var(--neon-purple)", border: "1px solid rgba(168,85,247,0.3)" }}>{proxy.type}</span>
                               {proxy.active && <span className="cyber-badge" style={{ background: "rgba(0,255,136,0.15)", color: "var(--neon-green)", border: "1px solid var(--neon-green)" }}>ВКЛ</span>}
                             </div>
                             <p className="font-mono text-xs text-muted-foreground">{proxy.host}:{proxy.port}</p>
                           </div>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 shrink-0">
                             <button onClick={() => toggleProxy(proxy.id)} className="btn-neon btn-neon-purple text-xs py-1 px-2.5 rounded">
                               <span>{proxy.active ? "ОТКЛ" : "ВКЛ"}</span>
                             </button>
                             <button onClick={() => deleteProxy(proxy.id)}
-                              className="w-7 h-7 rounded-md flex items-center justify-center"
+                              className="w-7 h-7 rounded-md flex items-center justify-center hover:opacity-70 transition-opacity"
                               style={{ border: "1px solid var(--glass-border)", color: "hsl(var(--muted-foreground))" }}>
                               <Icon name="Trash2" size={12} />
                             </button>
@@ -506,13 +693,15 @@ export default function Index() {
 
                 <div className="relative">
                   <Icon name="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input placeholder="Поиск в истории..." value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)} className="cyber-input pl-9" />
+                  <input placeholder="Поиск в истории..." value={historySearch}
+                    onChange={e => setHistorySearch(e.target.value)} className="cyber-input pl-9" />
                 </div>
 
                 <div className="space-y-1.5">
                   {filteredHistory.map((item, i) => (
-                    <div key={item.id} className="glass-card px-4 py-3 flex items-center gap-3 animate-fade-in group cursor-pointer"
+                    <button key={item.id}
+                      onClick={() => window.open(item.url, "_blank", "noopener,noreferrer")}
+                      className="glass-card px-4 py-3 flex items-center gap-3 w-full text-left animate-fade-in group cursor-pointer"
                       style={{ animationDelay: `${i * 0.05}s` }}>
                       <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0"
                         style={{ background: "rgba(0,212,255,0.06)", border: "1px solid var(--glass-border)" }}>
@@ -522,15 +711,15 @@ export default function Index() {
                         <p className="font-rajdhani font-semibold text-sm truncate">{item.title}</p>
                         <p className="font-mono text-xs text-muted-foreground truncate">{item.url}</p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="font-mono text-xs text-muted-foreground">{item.time}</span>
-                        <button className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded flex items-center justify-center transition-all"
-                          style={{ border: "1px solid var(--glass-border)" }}>
-                          <Icon name="X" size={10} className="text-muted-foreground" />
-                        </button>
-                      </div>
-                    </div>
+                      <span className="font-mono text-xs text-muted-foreground shrink-0">{item.time}</span>
+                    </button>
                   ))}
+                  {filteredHistory.length === 0 && (
+                    <div className="text-center py-8">
+                      <Icon name="SearchX" size={32} className="mx-auto mb-2 text-muted-foreground" />
+                      <p className="font-rajdhani text-muted-foreground">Ничего не найдено</p>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -540,11 +729,13 @@ export default function Index() {
                   </h2>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {QUICK_LINKS.map((link, i) => (
-                      <div key={link.id} className="glass-card px-3 py-2.5 flex items-center gap-2.5 cursor-pointer animate-fade-in"
+                      <button key={link.id}
+                        onClick={() => window.open(link.url, "_blank", "noopener,noreferrer")}
+                        className="glass-card px-3 py-2.5 flex items-center gap-2.5 cursor-pointer animate-fade-in w-full text-left"
                         style={{ animationDelay: `${i * 0.05}s` }}>
                         <Icon name={link.icon} size={13} style={{ color: "var(--neon-cyan)" }} />
                         <span className="font-rajdhani font-semibold text-sm truncate">{link.title}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -561,7 +752,7 @@ export default function Index() {
 
                 <div className="glass-card p-5 neon-border-cyan">
                   <div className="flex items-center gap-4">
-                    <div className="relative w-16 h-16 animate-float">
+                    <div className="relative w-16 h-16 animate-float shrink-0">
                       <div className="absolute inset-0 rounded-full animate-spin-slow"
                         style={{ border: "2px solid var(--neon-cyan)", borderTopColor: "transparent", opacity: 0.4 }} />
                       <div className="absolute inset-2 rounded-full flex items-center justify-center"
@@ -570,10 +761,13 @@ export default function Index() {
                       </div>
                     </div>
                     <div>
-                      <p className="font-orbitron font-black text-3xl" style={{ color: "var(--neon-green)" }}>87</p>
-                      <p className="font-rajdhani text-muted-foreground text-sm">Индекс защиты</p>
-                      <div className="mt-1.5 h-1.5 rounded-full w-32 overflow-hidden" style={{ background: "rgba(0,255,136,0.1)" }}>
-                        <div className="h-full rounded-full" style={{ width: "87%", background: "var(--neon-green)", boxShadow: "0 0 8px var(--neon-green)" }} />
+                      <p className="font-orbitron font-black text-3xl" style={{ color: "var(--neon-green)" }}>
+                        {[adBlock, tracking, httpsForce].filter(Boolean).length * 29}
+                      </p>
+                      <p className="font-rajdhani text-muted-foreground text-sm">Индекс защиты / 87</p>
+                      <div className="mt-1.5 h-1.5 rounded-full w-40 overflow-hidden" style={{ background: "rgba(0,255,136,0.1)" }}>
+                        <div className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${([adBlock, tracking, httpsForce].filter(Boolean).length / 3) * 100}%`, background: "var(--neon-green)", boxShadow: "0 0 8px var(--neon-green)" }} />
                       </div>
                     </div>
                   </div>
@@ -699,7 +893,7 @@ export default function Index() {
                       { name: "Yellow", color: "#ffcc00" },
                     ].map(c => (
                       <button key={c.name} title={c.name}
-                        className="w-9 h-9 rounded-full transition-all hover:scale-110"
+                        className="w-9 h-9 rounded-full transition-all hover:scale-110 border-2 border-transparent hover:border-white"
                         style={{ background: c.color, boxShadow: `0 0 12px ${c.color}80` }} />
                     ))}
                   </div>
@@ -711,7 +905,8 @@ export default function Index() {
                     О БРАУЗЕРЕ
                   </h2>
                   {[["Версия", "HakWeb 2.6.1"], ["Движок", "Chromium 124"], ["Сборка", "2026-03-18"], ["Платформа", "Web SPA"]].map(([k, v]) => (
-                    <div key={k} className="flex items-center justify-between py-1" style={{ borderBottom: "1px solid var(--glass-border)" }}>
+                    <div key={k} className="flex items-center justify-between py-1.5"
+                      style={{ borderBottom: "1px solid var(--glass-border)" }}>
                       <span className="font-mono text-xs text-muted-foreground">{k}</span>
                       <span className="font-mono text-xs" style={{ color: "var(--neon-cyan)" }}>{v}</span>
                     </div>
@@ -729,19 +924,19 @@ export default function Index() {
                 </div>
 
                 <div className="glass-card p-5 flex items-center gap-5 neon-border-cyan">
-                  <div className="relative">
+                  <div className="relative shrink-0">
                     <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
                       style={{ background: "rgba(0,212,255,0.1)", border: "2px solid var(--neon-cyan)", boxShadow: "0 0 20px rgba(0,212,255,0.3)" }}>
                       <span className="font-orbitron font-black text-2xl" style={{ color: "var(--neon-cyan)" }}>
-                        {profileName[0]}
+                        {profileName[0]?.toUpperCase() || "U"}
                       </span>
                     </div>
                     <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-background"
                       style={{ background: "var(--neon-green)", boxShadow: "0 0 6px var(--neon-green)" }} />
                   </div>
-                  <div className="flex-1">
-                    <p className="font-orbitron font-bold text-lg" style={{ color: "var(--neon-cyan)" }}>{profileName}</p>
-                    <p className="font-mono text-sm text-muted-foreground">{profileEmail}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-orbitron font-bold text-lg truncate" style={{ color: "var(--neon-cyan)" }}>{profileName}</p>
+                    <p className="font-mono text-sm text-muted-foreground truncate">{profileEmail}</p>
                     <div className="flex items-center gap-1.5 mt-1.5">
                       <span className="cyber-badge" style={{ background: "rgba(0,255,136,0.15)", color: "var(--neon-green)", border: "1px solid var(--neon-green)" }}>PRO</span>
                       <span className="cyber-badge" style={{ background: "rgba(168,85,247,0.15)", color: "var(--neon-purple)", border: "1px solid var(--neon-purple)" }}>VERIFIED</span>
@@ -801,20 +996,26 @@ export default function Index() {
       </div>
 
       {/* ===== BOTTOM STATUS BAR ===== */}
-      <footer className="glass px-4 py-1.5 flex items-center gap-4 text-xs"
+      <footer className="glass px-4 py-1.5 flex items-center gap-4 text-xs flex-wrap"
         style={{ borderTop: "1px solid var(--glass-border)" }}>
-        <span className="font-mono text-muted-foreground flex items-center gap-1.5">
+        <span className="font-mono flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full animate-pulse-neon" style={{ background: "var(--neon-green)" }} />
           <span style={{ color: "var(--neon-green)" }}>ЗАЩИЩЕНО</span>
         </span>
         {activeVless && (
-          <span className="font-mono" style={{ color: "var(--neon-green)" }}>VPN: {activeVless.name} ({activeVless.ping}ms)</span>
+          <span className="font-mono" style={{ color: "var(--neon-green)" }}>VPN: {activeVless.name} · {activeVless.ping}ms</span>
         )}
         {activeProxy && (
           <span className="font-mono" style={{ color: "var(--neon-purple)" }}>PROXY: {activeProxy.name}</span>
         )}
-        <span className="ml-auto font-mono text-muted-foreground">
-          HakWeb v2.6.1 · <span style={{ color: "var(--neon-cyan)" }}>{new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
+        <span className="ml-auto font-mono text-muted-foreground flex items-center gap-3">
+          <a href="https://t.me/internetcomunity" target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1 transition-opacity hover:opacity-80"
+            style={{ color: "var(--neon-cyan)" }}>
+            <Icon name="MessageCircle" size={11} />
+            @internetcomunity
+          </a>
+          <span>HakWeb v2.6.1 · <span style={{ color: "var(--neon-cyan)" }}>{new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span></span>
         </span>
       </footer>
     </div>
